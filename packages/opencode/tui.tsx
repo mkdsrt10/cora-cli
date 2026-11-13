@@ -3,7 +3,7 @@
 // prompt footer, and the /cora command. Never a popup, never in the transcript.
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal, For } from "solid-js"
-import { buildView, envDisabled, renderCard, renderLine, runOfferCommand } from "../core/src/index.ts"
+import { buildView, envDisabled, handleCommand, renderCard, renderLine, type Asker } from "../core/src/index.ts"
 
 const STARTED = ["session.execution.started"] as const
 const ENDED = ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"] as const
@@ -24,6 +24,13 @@ export default Plugin.define({
     // Picks up changes made by `cora` in another terminal, and expired snoozes.
     const timer = setInterval(refresh, 15_000)
 
+    // Questions use opencode's own dialogs, and only after the user runs /cora take.
+    const asker: Asker = {
+      choice: (title, options) =>
+        context.ui.dialog.select({ title, options: options.map((option) => ({ title: option, value: option })) }),
+      text: (title) => context.ui.dialog.prompt({ title, placeholder: "Type your answer" }),
+    }
+
     context.keymap.layer(() => ({
       mode: "global",
       commands: [
@@ -33,8 +40,8 @@ export default Plugin.define({
           group: "Cora",
           palette: true,
           slash: { name: "cora", arguments: true },
-          run: (input?: string) => {
-            const result = runOfferCommand(input ?? "status")
+          run: async (input?: string) => {
+            const result = await handleCommand(input ?? "status", asker)
             refresh()
             context.ui.toast.show({ title: "Cora", message: result.message })
           },

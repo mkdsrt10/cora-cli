@@ -2,8 +2,8 @@
 // below the editor and a status line in the footer, and adds /cora.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import {
-  buildView, discoverModels, envDisabled, loadConfig, PLACEHOLDER_KEY, PROVIDER_ID, PROVIDER_NAME, renderCard,
-  renderLine, runOfferCommand,
+  buildView, discoverModels, envDisabled, handleCommand, loadConfig, PLACEHOLDER_KEY, PROVIDER_ID, PROVIDER_NAME, renderCard,
+  renderLine,
 } from "../core/src/index.ts"
 
 export default async function (pi: ExtensionAPI) {
@@ -45,9 +45,12 @@ export default async function (pi: ExtensionAPI) {
   pi.on("agent_settled", async (_event, ctx) => { working = false; draw(ctx) })
 
   pi.registerCommand("cora", {
-    description: "Cora offers and balance: open | snooze | off | on | status",
+    description: "Cora offers and balance: take | snooze | off | on | status",
     handler: async (args, ctx) => {
-      const result = runOfferCommand(args ?? "status")
+      const result = await handleCommand(args ?? "status", {
+        choice: (title, options) => ctx.ui.select(title, options),
+        text: (title) => ctx.ui.input(title, "Type your answer"),
+      })
       draw(ctx)
       ctx.ui.notify(result.message, "info")
     },

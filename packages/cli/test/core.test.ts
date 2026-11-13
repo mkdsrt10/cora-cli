@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
-import { mkdtempSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { beforeEach, test } from "node:test"
 import {
-  buildView, currentOffer, DEMO_OFFERS, envDisabled, loadState, renderLine, runOfferCommand, SNOOZE_MS,
+  answersFile, buildView, currentOffer, DEMO_OFFERS, envDisabled, handleCommand, loadState, renderLine, runOfferCommand,
+  SNOOZE_MS, type Asker,
 } from "../../core/src/index.ts"
 
 beforeEach(() => {
@@ -17,18 +18,43 @@ test("a fresh install shows the first demo offer and a zero demo balance", () =>
   assert.equal(view.balance, 0)
 })
 
-test("opening a demo offer credits it once and moves to the next offer", () => {
-  const opened: string[] = []
-  runOfferCommand("open", (url) => opened.push(url))
+/** Picks the first option and types "x"; cancels at question number cancelAt. */
+function scripted(cancelAt = Infinity): Asker & { asked: string[] } {
+  const asked: string[] = []
+  const answer = (title: string, value: string) => {
+    asked.push(title)
+    return Promise.resolve(asked.length === cancelAt ? undefined : value)
+  }
+  return { asked, choice: (title, options) => answer(title, options[0]), text: (title) => answer(title, "x") }
+}
+
+test("taking a survey asks every question, saves the answers and credits once", async () => {
+  const asker = scripted()
+  const result = await handleCommand("take", asker)
+  assert.equal(asker.asked.length, DEMO_OFFERS[0].questions!.length)
+  assert.match(result.message, /Submitted/)
   assert.equal(loadState().balance, DEMO_OFFERS[0].credits)
-  assert.equal(opened.length, 1)
+  const saved = JSON.parse(readFileSync(answersFile(), "utf8").trim())
+  assert.equal(saved.offer, DEMO_OFFERS[0].id)
+  assert.deepEqual(Object.keys(saved.answers), DEMO_OFFERS[0].questions!.map((question) => question.id))
   assert.equal(buildView().offer?.id, DEMO_OFFERS[1].id)
 })
 
-test("when every offer is opened there is nothing to open or credit", () => {
-  for (const _ of DEMO_OFFERS) runOfferCommand("open", () => {})
+test("cancelling part way saves nothing, credits nothing and keeps the offer", async () => {
+  const result = await handleCommand("take", scripted(2))
+  assert.equal(result.message, "Closed. Nothing was saved.")
+  assert.equal(loadState().balance, 0)
+  assert.equal(existsSync(answersFile()), false)
+  assert.equal(buildView().offer?.id, DEMO_OFFERS[0].id)
+})
+
+test("when every offer is answered there is nothing to take or credit", async () => {
+  for (const _ of DEMO_OFFERS) await handleCommand("take", scripted())
   const total = loadState().balance
-  assert.equal(runOfferCommand("open", () => { throw new Error("must not open") }).message, "No offer right now.")
+  assert.equal(total, DEMO_OFFERS.reduce((sum, offer) => sum + offer.credits, 0))
+  const asker = scripted()
+  assert.equal((await handleCommand("take", asker)).message, "No offer right now.")
+  assert.equal(asker.asked.length, 0)
   assert.equal(loadState().balance, total)
 })
 

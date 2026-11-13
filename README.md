@@ -8,10 +8,10 @@ Adds Cora models to the model picker of the coding tools you already use, and sh
 
 | Tool | Cora models | Offers | Checked |
 |---|---|---|---|
-| opencode 2.2+ | In `/models`, next to your own | Sidebar card, footer line, `/cora` | Yes, on opencode 2.2.1 |
-| Pi 1.5+ | In `/model`, next to your own | Widget below the editor, footer status, `/cora` | Yes, on Pi 1.5.2 |
-| Codex CLI 0.134+ | In `/model` under `codex --profile cora` | `cora pane` in a second split | Yes, on Codex 0.169.0 |
-| CodeWhale (DeepSeek CLI) | `Cora` in `/provider` | `cora pane` in a second split | No. Written from its docs |
+| opencode 2.2+ | In `/models`, next to your own | Sidebar card, footer line, answered in place with `/cora take` | Yes, on opencode 2.2.1 |
+| Pi 1.5+ | In `/model`, next to your own | Widget below the editor, footer status, answered in place with `/cora take` | Yes, on Pi 1.5.2 |
+| Codex CLI 0.134+ | In `/model` under `codex --profile cora` | `cora pane` and `cora earn take` in a second split | Yes, on Codex 0.169.0 |
+| CodeWhale (DeepSeek CLI) | `Cora` in `/provider` | `cora pane` and `cora earn take` in a second split | No. Written from its docs |
 
 Codex and CodeWhale give plugins no place to draw, so offers for them live in `cora pane` and `cora line`.
 
@@ -54,18 +54,24 @@ Cora never edits your existing settings in place (the CodeWhale block is the one
 
 ## Offers
 
-One offer shows at a time, with its label, time and credit up front: `Survey · ~4 min · +300 cr`. Offers never appear as a popup, never block input, and never enter the model's context or the transcript.
+One offer shows at a time, with its label, time and credit up front: `Survey · ~1 min · +300 cr`. Offers never appear on their own as a popup, never block input, and never enter the model's context or the transcript.
 
-| Command | In opencode and Pi | In a shell |
+You answer a survey where you are. `/cora take` asks its questions one at a time in the tool's own dialogs, and the last answer submits it. Closing any question cancels: nothing is saved and no credit is given.
+
+| Command | In opencode and Pi | In a shell (Codex, CodeWhale) |
 |---|---|---|
-| Open the offer in your browser | `/cora open` | `cora earn open` |
+| Answer the current offer | `/cora take` | `cora earn take` |
 | Hide offers for an hour | `/cora snooze` | `cora earn snooze` |
 | Hide offers until turned back on | `/cora off`, `/cora on` | `cora off`, `cora on` |
 | Balance and current offer | `/cora` | `cora earn` |
 
+An offer without questions opens its URL in your browser instead.
+
 ### Demo offers
 
-v1 ships three demo offers. Opening one opens this page and adds its credits to a local demo balance, so the flow can be seen end to end. Demo credits have no value and nothing is spent when you use a model. To try your own list, put an array of offers in `~/.cora/offers.json`.
+v1 ships three short demo offers. Submitting one adds its credits to a local demo balance, so the flow can be seen end to end. Demo credits have no value and nothing is spent when you use a model. There is no Cora server yet, so "submit" appends your answers to `~/.cora/answers.jsonl` on your machine and sends them nowhere.
+
+To try your own list, put an array of offers in `~/.cora/offers.json`. Each has `id`, `label`, `title`, `minutes`, `credits`, `url`, and optional `questions` (`id`, `text`, and `options` for a multiple-choice question).
 
 ## Switching it off
 

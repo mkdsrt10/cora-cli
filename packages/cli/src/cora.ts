@@ -2,8 +2,8 @@
 import { createInterface } from "node:readline/promises"
 import { homedir } from "node:os"
 import {
-  buildView, configFile, coraDir, discoverModels, envDisabled, isConfigured, loadConfig, renderCard, renderLine,
-  runOfferCommand, saveConfig, type Config, type ModelDef,
+  buildView, configFile, coraDir, discoverModels, envDisabled, handleCommand, isConfigured, loadConfig, renderCard,
+  renderLine, saveConfig, type Asker, type Config, type ModelDef,
 } from "../../core/src/index.ts"
 import { findHost, HOSTS, type HostContext } from "./hosts.ts"
 
@@ -15,7 +15,7 @@ const HELP = `cora — free models and optional surveys for the coding tools you
   cora models on  <tool...> [--yes]             add Cora models to a tool (shows the change first)
   cora models off <tool...>                     undo it
   cora status                                   endpoint, balance, and every file Cora wrote
-  cora earn [open|snooze]                       show, open or snooze the current offer
+  cora earn [take|snooze]                       show, answer or snooze the current offer
   cora on | off                                 show or hide offers
   cora line                                     one-line status for a prompt or tmux bar
   cora pane                                     live view for a second terminal split
@@ -47,6 +47,34 @@ async function confirm(question: string): Promise<boolean> {
   const answer = await prompt.question(`${question} [y/N] `)
   prompt.close()
   return /^y(es)?$/i.test(answer.trim())
+}
+
+/** Asks survey questions in the shell. An empty answer or ctrl+d cancels. */
+function shellAsker(): Asker & { close(): void } {
+  const prompt = createInterface({ input: process.stdin })
+  // Reading lines in order also works when answers are piped in.
+  const lines = prompt[Symbol.asyncIterator]()
+  const ask = async (question: string) => {
+    process.stdout.write(question)
+    const line = await lines.next()
+    return line.done ? undefined : line.value.trim() || undefined
+  }
+  return {
+    close: () => prompt.close(),
+    text: (title) => ask(`${title}\n> `),
+    async choice(title, options) {
+      const list = options.map((option, index) => `  ${index + 1}. ${option}`).join("\n")
+      const answer = await ask(`${title}\n${list}\n> `)
+      return options[Number(answer) - 1]
+    },
+  }
+}
+
+async function earn(sub: string): Promise<void> {
+  const asker = shellAsker()
+  const result = await handleCommand(sub, asker)
+  asker.close()
+  console.log(result.message)
 }
 
 async function setup(args: string[]): Promise<void> {
@@ -129,8 +157,8 @@ async function pane(): Promise<void> {
   if (!process.stdout.isTTY || envDisabled()) return
   const draw = () => {
     const width = Math.min(process.stdout.columns ?? 40, 60)
-    const lines = renderCard(buildView()).map((line) => line.slice(0, width))
-    process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n") + "\n\ncora earn open · cora earn snooze · ctrl+c to close\n")
+    const lines = renderCard(buildView()).filter((line) => !line.startsWith("/cora")).map((line) => line.slice(0, width))
+    process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n") + "\n\nIn another shell: cora earn take · cora earn snooze\nctrl+c to close\n")
   }
   draw()
   setInterval(draw, 5000)
@@ -143,9 +171,9 @@ async function main(): Promise<void> {
     case "tools": return tools()
     case "models": return models(args)
     case "status": return status()
-    case "earn": return console.log(runOfferCommand(args[0] ?? "status").message)
+    case "earn": return earn(args[0] ?? "status")
     case "on":
-    case "off": return console.log(runOfferCommand(command).message)
+    case "off": return earn(command)
     case "line": {
       if (envDisabled()) return
       return console.log(renderLine(buildView(), Number(flag(args, "--width")) || process.stdout.columns || 80))

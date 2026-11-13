@@ -32,5 +32,5 @@ export function renderCard(view: View): string[] {
   const lines = [`cora · ${balanceText(view)}`]
   if (view.offersOff) return [...lines, "Offers hidden · /cora on"]
   if (!view.offer) return [...lines, "No offer right now"]
-  return [...lines, offerText(view.offer), view.offer.title, "/cora open · /cora snooze · /cora off"]
+  return [...lines, offerText(view.offer), view.offer.title, view.offer.questions?.length ? "/cora take · /cora snooze · /cora off" : "/cora open · /cora snooze · /cora off"]
 }
