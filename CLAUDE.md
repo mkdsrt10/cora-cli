@@ -21,3 +21,7 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Commits
+
+Commits and PRs are authored by the repo owner (`mkdsrt10`) alone. Never add `Co-Authored-By` lines, "Generated with" footers or any other AI attribution to commit messages, PR descriptions or issues.
