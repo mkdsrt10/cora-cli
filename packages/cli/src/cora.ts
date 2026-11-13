@@ -1,4 +1,5 @@
 // The `cora` command.
+import { emitKeypressEvents } from "node:readline"
 import { createInterface } from "node:readline/promises"
 import { homedir } from "node:os"
 import {
@@ -49,10 +50,63 @@ async function confirm(question: string): Promise<boolean> {
   return /^y(es)?$/i.test(answer.trim())
 }
 
-/** Asks survey questions in the shell. An empty answer or ctrl+d cancels. */
+/** Arrow-key menu for an interactive terminal. Resolves undefined on esc or ctrl+c. */
+function menu(title: string, options: string[]): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const { stdin, stdout } = process
+    let selected = 0
+    const draw = (first: boolean) => {
+      if (!first) stdout.write(`\x1b[${options.length}A`)
+      for (const [index, option] of options.entries()) {
+        const row = `${index === selected ? "›" : " "} ${index + 1}. ${option}`
+        stdout.write(`\x1b[2K${index === selected ? `\x1b[1m${row}\x1b[0m` : row}\n`)
+      }
+    }
+    const finish = (value: string | undefined) => {
+      stdin.off("keypress", onKey)
+      stdin.setRawMode(false)
+      stdin.pause()
+      stdout.write("\x1b[?25h")
+      resolve(value)
+    }
+    const onKey = (text: string | undefined, key: { name?: string; ctrl?: boolean }) => {
+      if (key.name === "escape" || (key.ctrl && (key.name === "c" || key.name === "d"))) return finish(undefined)
+      if (key.name === "return") return finish(options[selected])
+      const digit = Number(text)
+      if (digit >= 1 && digit <= options.length) {
+        selected = digit - 1
+        draw(false)
+        return finish(options[selected])
+      }
+      if (key.name === "up" || key.name === "k") selected = (selected + options.length - 1) % options.length
+      else if (key.name === "down" || key.name === "j") selected = (selected + 1) % options.length
+      else return
+      draw(false)
+    }
+    stdout.write(`${title}\n\x1b[2m↑↓ move · enter select · esc cancel\x1b[0m\n\x1b[?25l`)
+    draw(true)
+    emitKeypressEvents(stdin)
+    stdin.setRawMode(true)
+    stdin.resume()
+    stdin.on("keypress", onKey)
+  })
+}
+
+/** Asks survey questions in the shell: arrow keys in a terminal, typed lines when piped. */
 function shellAsker(): Asker & { close(): void } {
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    return {
+      close: () => {},
+      choice: menu,
+      async text(title) {
+        const prompt = createInterface({ input: process.stdin, output: process.stdout })
+        const answer = await prompt.question(`${title}\n\x1b[2menter submit · leave empty to cancel\x1b[0m\n> `).catch(() => "")
+        prompt.close()
+        return answer.trim() || undefined
+      },
+    }
+  }
   const prompt = createInterface({ input: process.stdin })
-  // Reading lines in order also works when answers are piped in.
   const lines = prompt[Symbol.asyncIterator]()
   const ask = async (question: string) => {
     process.stdout.write(question)
