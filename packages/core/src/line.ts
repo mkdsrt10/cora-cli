@@ -16,12 +16,15 @@ export function renderLine(view: View, width = 80): string {
   if (width < 12) return ""
   const icon = view.working ? "◆" : "◇"
   const short = `${icon} ${view.balance.toLocaleString("en-US")}cr`
-  if (width < 40) return short.length <= width ? short : ""
   const base = `${icon} cora ${balanceText(view)}`
+  if (base.length > width) return short.length <= width ? short : ""
   // Offers show only while idle, so a working agent is never decorated with one.
   if (!view.offer || view.working) return base
   const full = `${base} · ${offerText(view.offer)}`
-  return full.length <= width ? full : base
+  if (full.length <= width) return full
+  // Narrow status bars drop the time estimate rather than wrap.
+  const compact = `${base} · ${view.offer.label} +${view.offer.credits} cr`
+  return compact.length <= width ? compact : base
 }
 
 /** Lines for a small card (Pi widget, companion pane, opencode sidebar text). */

@@ -52,7 +52,7 @@ export default Plugin.define({
     })
     context.ui.slot({
       append: "prompt.footer.status",
-      render: () => <text fg={context.theme.text.base}>{renderLine(view(), 60)}</text>,
+      render: () => <text fg={context.theme.text.base}>{renderLine(view(), 38)}</text>,
     })
 
     return () => {
