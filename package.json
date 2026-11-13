@@ -1,0 +1,12 @@
+{
+  "name": "cora-cli-workspace",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.18" },
+  "bin": { "cora": "packages/cli/bin/cora.js" },
+  "scripts": {
+    "test": "node --test packages/cli/test/*.test.ts",
+    "cora": "node packages/cli/bin/cora.js"
+  }
+}
