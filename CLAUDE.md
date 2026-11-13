@@ -25,3 +25,5 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 ## Commits
 
 Commits and PRs are authored by the repo owner (`mkdsrt10`) alone. Never add `Co-Authored-By` lines, "Generated with" footers or any other AI attribution to commit messages, PR descriptions or issues.
+
+Author identity for every commit: name `mkdsrt10`, email `33832035+mkdsrt10@users.noreply.github.com` (GitHub no-reply). Check `git config user.name` and `user.email` before committing, and never commit with a work or personal email. If history ever contains another author or an attribution line, tell the owner; rewriting and force-pushing needs their go-ahead.
