@@ -2,7 +2,7 @@
 // below the editor and a status line in the footer, and adds /cora.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import {
-  buildView, discoverModels, envDisabled, handleCommand, loadConfig, PLACEHOLDER_KEY, PROVIDER_ID, PROVIDER_NAME, renderCard,
+  buildView, discoverModels, envDisabled, handleCommand, hasOffer, loadConfig, refreshSummary, PLACEHOLDER_KEY, PROVIDER_ID, PROVIDER_NAME, renderCard,
   renderLine,
 } from "../core/src/index.ts"
 
@@ -36,13 +36,22 @@ export default async function (pi: ExtensionAPI) {
     const view = buildView(working)
     ctx.ui.setStatus("cora", renderLine(view, 60))
     // The widget is the offer only; with no offer it disappears.
-    const card = view.offer && !view.offersOff ? renderCard(view).slice(1) : undefined
+    const card = hasOffer(view) && !view.offersOff ? renderCard(view).slice(1) : undefined
     ctx.ui.setWidget("cora", card, { placement: "belowEditor" })
   }
 
-  pi.on("session_start", async (_event, ctx) => draw(ctx))
+  // Logged in: read the balance at start and after each run, so spending shows as it happens.
+  // Only with a UI: a print-mode run has nothing to draw and must exit promptly.
+  const sync = (ctx: any) => ctx?.hasUI && void refreshSummary().then(() => {
+    try {
+      draw(ctx)
+    } catch {
+      // The session ended while the balance was being read; there is nothing left to draw on.
+    }
+  })
+  pi.on("session_start", async (_event, ctx) => { draw(ctx); sync(ctx) })
   pi.on("agent_start", async (_event, ctx) => { working = true; draw(ctx) })
-  pi.on("agent_settled", async (_event, ctx) => { working = false; draw(ctx) })
+  pi.on("agent_settled", async (_event, ctx) => { working = false; draw(ctx); sync(ctx) })
 
   pi.registerCommand("cora", {
     description: "Cora offers and balance: take | snooze | off | on | status",

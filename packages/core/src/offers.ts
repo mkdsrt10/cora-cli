@@ -2,7 +2,11 @@
 import { spawn } from "node:child_process"
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { coraDir, readJson, writeJson } from "./config.ts"
+import { coraDir, loadConfig, readJson, writeJson } from "./config.ts"
+import {
+  coraDollars, fetchNextQuestion, fetchSummary, ServiceError, submitAnswer, type ServiceOffer, type ServiceQuestion,
+  type Summary,
+} from "./service.ts"
 
 export type Question = {
   id: string
@@ -39,6 +43,8 @@ export type State = {
   snoozeUntil: number
   /** Offer ids already opened (and credited, for demo offers). */
   opened: string[]
+  /** Last balance and offer read from the Cora service; what every surface renders when logged in. */
+  service?: { balanceMicro: number; offer: ServiceOffer | null; fetchedAt: number }
 }
 
 export const SNOOZE_MS = 60 * 60 * 1000
@@ -81,6 +87,7 @@ export function loadState(): State {
     offersOff: Boolean(saved.offersOff),
     snoozeUntil: Number(saved.snoozeUntil) || 0,
     opened: Array.isArray(saved.opened) ? saved.opened.map(String) : [],
+    service: saved.service,
   }
 }
 
@@ -104,6 +111,7 @@ export function answersFile(): string {
  * v1 has no Cora server: "submit" appends to a local file.
  */
 export async function takeSurvey(asker: Asker): Promise<CommandResult> {
+  if (loadConfig().service) return { message: await takeServiceSurvey(asker), state: loadState() }
   const state = loadState()
   const offer = currentOffer(state, loadOffers())
   if (!offer) return { message: "No offer right now.", state }
@@ -130,8 +138,69 @@ export async function takeSurvey(asker: Asker): Promise<CommandResult> {
 /** Every `/cora <sub>` and `cora earn <sub>` goes through here. */
 export async function handleCommand(sub: string, asker: Asker): Promise<CommandResult> {
   const word = sub.trim().split(/\s+/)[0] || "status"
-  if (word === "take" || word === "open") return takeSurvey(asker)
+  if (word === "take" || word === "open" || word === "answer") return takeSurvey(asker)
+  await refreshSummary()
   return runOfferCommand(word)
+}
+
+function cacheSummary(summary: Summary): void {
+  saveState({ ...loadState(), service: { balanceMicro: summary.balanceMicro, offer: summary.offer, fetchedAt: Date.now() } })
+}
+
+/** Reads balance and offer from the Cora service into the local cache. A no-op when not logged in. */
+export async function refreshSummary(maxAgeMs = 0): Promise<void> {
+  if (!loadConfig().service) return
+  const cached = loadState().service
+  if (cached && Date.now() - cached.fetchedAt < maxAgeMs) return
+  try {
+    cacheSummary(await fetchSummary())
+  } catch {
+    // Offline: surfaces keep showing the last known balance.
+  }
+}
+
+async function pickChoices(question: ServiceQuestion, title: string, asker: Asker): Promise<string[] | undefined> {
+  const labels = question.choices.map((choice) => choice.label)
+  if (question.type === "single") {
+    const picked = await asker.choice(title, labels)
+    const index = picked === undefined ? -1 : labels.indexOf(picked)
+    return index < 0 ? undefined : [question.choices[index].id]
+  }
+  // Multiple choice: each pick toggles an option until "Done".
+  const chosen = new Set<number>()
+  for (;;) {
+    const options = labels.map((label, index) => `${chosen.has(index) ? "[x]" : "[ ]"} ${label}`)
+    const done = chosen.size ? "Done" : "Done (pick at least one first)"
+    const picked = await asker.choice(`${title} (pick all that apply)`, [...options, done])
+    if (picked === undefined) return undefined
+    const index = options.indexOf(picked)
+    if (index < 0) {
+      if (chosen.size) return [...chosen].sort((a, b) => a - b).map((item) => question.choices[item].id)
+    } else if (chosen.has(index)) chosen.delete(index)
+    else chosen.add(index)
+  }
+}
+
+/**
+ * Logged in: the Cora service sends one question at a time and each answer is
+ * saved as it is given, so stopping midway loses nothing.
+ */
+async function takeServiceSurvey(asker: Asker): Promise<string> {
+  try {
+    for (;;) {
+      const next = await fetchNextQuestion()
+      if ("done" in next) return "No survey right now."
+      const { survey, question } = next
+      const title = `${survey.label} ${survey.answered + 1}/${survey.questions} · ${question.text}`
+      const choiceIds = await pickChoices(question, title, asker)
+      if (!choiceIds) return "Closed. Your answers so far are saved; continue with /cora take."
+      const result = await submitAnswer(survey.id, question.id, choiceIds)
+      cacheSummary(result)
+      if (result.completed) return `Submitted. +${coraDollars(result.rewardMicro)}. Balance: ${coraDollars(result.balanceMicro, 3)}.`
+    }
+  } catch (error) {
+    return error instanceof ServiceError ? error.message : "Something went wrong with the survey."
+  }
 }
 
 /** The one offer to show now, or undefined when off, snoozed or all opened. */
@@ -177,6 +246,7 @@ export function runOfferCommand(sub: string, open: (url: string) => void = openI
   }
   switch (sub.trim().split(/\s+/)[0] || "status") {
     case "open": {
+      if (loadConfig().service) return { message: "Answer the survey here with /cora take.", state }
       if (!offer) return { message: "No offer right now.", state }
       open(offer.url)
       const next = markOpened(state, offer)
@@ -190,12 +260,21 @@ export function runOfferCommand(sub: string, open: (url: string) => void = openI
     case "on":
       return finish(setOffersOff(state, false), "Offers on.")
     default:
-      return { message: describe(state, offer), state }
+      return { message: loadConfig().service ? describeService(state) : describe(state, offer), state }
   }
 }
 
 export function offerText(offer: Offer): string {
   return `${offer.label} · ~${offer.minutes} min · +${offer.credits} cr`
+}
+
+function describeService(state: State): string {
+  if (!state.service) return "Logged in. The balance has not been read yet."
+  const balance = `Balance ${coraDollars(state.service.balanceMicro, 3)}`
+  const offer = state.service.offer
+  if (state.offersOff) return `${balance}. Offers are hidden.`
+  if (!offer) return `${balance}. No survey right now.`
+  return `${balance}. ${offer.label}: ${offer.title} (${offer.questions} questions, +${coraDollars(offer.rewardMicro)})`
 }
 
 export function describe(state: State, offer: Offer | undefined): string {

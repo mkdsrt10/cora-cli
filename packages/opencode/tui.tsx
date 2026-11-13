@@ -3,7 +3,9 @@
 // prompt footer, and the /cora command. Never a popup, never in the transcript.
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal, For } from "solid-js"
-import { buildView, envDisabled, handleCommand, renderCard, renderLine, type Asker } from "../core/src/index.ts"
+import {
+  buildView, envDisabled, handleCommand, refreshSummary, renderCard, renderLine, type Asker,
+} from "../core/src/index.ts"
 
 const STARTED = ["session.execution.started"] as const
 const ENDED = ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"] as const
@@ -16,10 +18,13 @@ export default Plugin.define({
     const [working, setWorking] = createSignal(false)
     const [view, setView] = createSignal(buildView(false))
     const refresh = () => setView(buildView(working()))
+    // Logged in: read the balance at start and after each run, so spending shows as it happens.
+    const sync = () => void refreshSummary().then(refresh)
+    sync()
 
     const stops = [
       ...STARTED.map((type) => context.data.on(type, () => { setWorking(true); refresh() })),
-      ...ENDED.map((type) => context.data.on(type, () => { setWorking(false); refresh() })),
+      ...ENDED.map((type) => context.data.on(type, () => { setWorking(false); refresh(); sync() })),
     ]
     // Picks up changes made by `cora` in another terminal, and expired snoozes.
     const timer = setInterval(refresh, 15_000)

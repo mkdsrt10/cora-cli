@@ -1,22 +1,28 @@
 // The `cora` command.
 import { emitKeypressEvents } from "node:readline"
 import { createInterface } from "node:readline/promises"
+import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import {
-  buildView, configFile, coraDir, discoverModels, envDisabled, handleCommand, isConfigured, loadConfig, renderCard,
-  renderLine, saveConfig, type Asker, type Config, type ModelDef,
+  balanceText, buildView, configFile, coraDir, DEFAULT_API_URL, discoverModels, envDisabled, handleCommand, isConfigured,
+  loadConfig, loadState, outboxFile, refreshSummary, renderCard, renderLine, revokeKey, saveConfig, saveLogin, saveState,
+  type Asker, type Config, type ModelDef,
 } from "../../core/src/index.ts"
 import { findHost, HOSTS, type HostContext } from "./hosts.ts"
+import { login } from "./login.ts"
 
 const HELP = `cora — free models and optional surveys for the coding tools you already use
 
-  cora setup [--base-url URL] [--api-key KEY]   point Cora at an OpenAI-compatible endpoint
+  cora login [--api URL] [--paste]              sign in to a Cora service (opens your browser)
+  cora logout                                   revoke the key and go back to your local endpoint
+  cora setup [--base-url URL] [--api-key KEY]   point Cora at an OpenAI-compatible endpoint (no login)
   cora tools                                    supported tools and whether Cora is on in each
   cora models list                              models your endpoint serves
   cora models on  <tool...> [--yes]             add Cora models to a tool (shows the change first)
   cora models off <tool...>                     undo it
   cora status                                   endpoint, balance, and every file Cora wrote
   cora earn [take|snooze]                       show, answer or snooze the current offer
+  cora outbox [--tail N]                        every request Cora's code sent to the Cora service
   cora on | off                                 show or hide offers
   cora line                                     one-line status for a prompt or tmux bar
   cora pane                                     live view for a second terminal split
@@ -32,7 +38,7 @@ function flag(args: string[], name: string): string | undefined {
 function positional(args: string[]): string[] {
   const out: string[] = []
   for (let index = 0; index < args.length; index++) {
-    if (args[index] === "--base-url" || args[index] === "--api-key") index++
+    if (["--base-url", "--api-key", "--api", "--tail", "--width"].includes(args[index])) index++
     else if (!args[index].startsWith("--")) out.push(args[index])
   }
   return out
@@ -191,9 +197,52 @@ async function models(args: string[]): Promise<void> {
   }
 }
 
+/** Tools that copy the endpoint into a file of their own are rewritten when it changes. */
+async function rewriteTools(): Promise<void> {
+  const ctx = await context()
+  for (const host of HOSTS) {
+    if (!host.copiesEndpoint || !host.isOn(ctx)) continue
+    host.off(ctx)
+    host.on(ctx)
+    console.log(`${host.name}: updated for the new endpoint.`)
+  }
+}
+
+async function signIn(args: string[]): Promise<void> {
+  const apiUrl = (flag(args, "--api") ?? process.env.CORA_API_URL ?? loadConfig().service?.apiUrl ?? DEFAULT_API_URL).replace(/\/+$/, "")
+  await login(apiUrl, args.includes("--paste"))
+  console.log(`Signed in to ${apiUrl}. Balance: ${balanceText(buildView())}`)
+  await rewriteTools()
+  console.log("Restart your tools to pick up the Cora models. Earn more with: cora earn take")
+}
+
+async function signOut(): Promise<void> {
+  if (!loadConfig().service) return console.log("Not logged in.")
+  await revokeKey().catch((error: Error) => console.log(`Could not reach the service to revoke the key (${error.message}). Removing it locally.`))
+  saveLogin(undefined)
+  const { service: _service, ...state } = loadState()
+  saveState(state)
+  console.log("Logged out. Cora is back on your local endpoint.")
+  await rewriteTools()
+}
+
+function outbox(args: string[]): void {
+  let text = ""
+  try {
+    text = readFileSync(outboxFile(), "utf8")
+  } catch {
+    return console.log("Nothing has been sent to a Cora service.")
+  }
+  const lines = text.trim().split("\n").filter(Boolean)
+  for (const line of lines.slice(-(Number(flag(args, "--tail")) || 20))) console.log(line)
+  console.log(`${lines.length} request(s) logged in ${outboxFile()}. The key is sent as a header and is never logged.`)
+}
+
 async function status(): Promise<void> {
   const config = loadConfig()
+  await refreshSummary()
   const ctx = await context(config)
+  console.log(`Mode       ${config.service ? `signed in to ${config.service.apiUrl}` : "local endpoint (not signed in)"}`)
   console.log(`Endpoint   ${config.baseUrl}${isConfigured() ? "" : "  (default; run cora setup)"}`)
   console.log(`Models     ${ctx.models.length ? ctx.models.map((model) => model.id).join(", ") : "none found (server not running?)"}`)
   console.log(`Balance    ${renderCard(buildView())[0].replace("cora · ", "")}`)
@@ -204,12 +253,15 @@ async function status(): Promise<void> {
     console.log(`${host.id.padEnd(10)} on`)
     for (const line of host.plan(ctx)) console.log(`             ${line}`)
   }
-  console.log("Network    Cora's code only reads the model list from the endpoint above. No Cora server exists in v1.")
+  console.log(config.service
+    ? "Network    Cora's code talks only to the service above; every request is in: cora outbox"
+    : "Network    Cora's code only reads the model list from the endpoint above.")
 }
 
 async function pane(): Promise<void> {
   if (!process.stdout.isTTY || envDisabled()) return
-  const draw = () => {
+  const draw = async () => {
+    await refreshSummary(20_000)
     const width = Math.min(process.stdout.columns ?? 40, 60)
     const lines = renderCard(buildView()).filter((line) => !line.startsWith("/cora")).map((line) => line.slice(0, width))
     process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n") + "\n\nIn another shell: cora earn take · cora earn snooze\nctrl+c to close\n")
@@ -221,6 +273,16 @@ async function pane(): Promise<void> {
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
   switch (command) {
+    case "login": return signIn(args)
+    case "logout": return signOut()
+    case "key": {
+      // Used by tools that fetch the key by command, so it is never written into their files.
+      const key = loadConfig().apiKey
+      if (!key) throw new Error("no key: run cora login")
+      return console.log(key)
+    }
+    case "outbox": return outbox(args)
+    case "answer": return earn("take")
     case "setup": return setup(args)
     case "tools": return tools()
     case "models": return models(args)
@@ -230,6 +292,7 @@ async function main(): Promise<void> {
     case "off": return earn(command)
     case "line": {
       if (envDisabled()) return
+      await refreshSummary(60_000)
       return console.log(renderLine(buildView(), Number(flag(args, "--width")) || process.stdout.columns || 80))
     }
     case "pane": return pane()

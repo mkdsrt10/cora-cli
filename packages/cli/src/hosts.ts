@@ -23,6 +23,8 @@ export type Host = {
   isOn(ctx: Pick<HostContext, "home" | "coraDir">): boolean
   /** How to use it after `on`. */
   next: string
+  /** True when the tool keeps its own copy of the endpoint, which must be rewritten after login or logout. */
+  copiesEndpoint?: boolean
 }
 
 function onPath(command: string): boolean {
@@ -167,6 +169,7 @@ function codexCatalog(models: ModelDef[]): string {
 }
 
 const codex: Host = {
+  copiesEndpoint: true,
   id: "codex",
   name: "Codex CLI",
   surface: "models in /model under the cora profile · offers via `cora pane`",
@@ -201,7 +204,9 @@ const codex: Host = {
       `base_url = ${JSON.stringify(ctx.config.baseUrl)}`,
       `wire_api = "responses"`,
       // The key stays in the environment; it is never written to this file.
-      ...(ctx.config.apiKey ? [`env_key = "CORA_API_KEY"`] : []),
+      ...(ctx.config.service
+        ? [`auth = { command = "cora", args = ["key"] }`]
+        : ctx.config.apiKey ? [`env_key = "CORA_API_KEY"`] : []),
       "",
     ]
     writeFileSync(profile, lines.join("\n"))
@@ -229,6 +234,7 @@ function stripBlock(text: string): string {
 }
 
 const codewhale: Host = {
+  copiesEndpoint: true,
   id: "codewhale",
   name: "CodeWhale (DeepSeek CLI)",
   surface: "Cora provider in /provider · offers via `cora pane` · untested, written from its docs",

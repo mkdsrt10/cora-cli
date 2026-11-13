@@ -2,7 +2,7 @@
 
 Adds Cora models to the model picker of the coding tools you already use, and shows optional, clearly labeled survey offers that earn credits. Open source, opt-in, and undone with one command.
 
-**Status: v1, early.** It runs from a clone of this repo against any OpenAI-compatible endpoint you run yourself (LM Studio, Ollama, vLLM). There is no Cora server yet: offers are built-in demos and the balance is a local demo number.
+**Status: v1, early.** It runs from a clone of this repo against any OpenAI-compatible endpoint you run yourself (LM Studio, Ollama, vLLM). Without a login, offers are built-in demos and the balance is a local demo number. With `cora login` it uses a Cora service for models, a real balance in Cora dollars and surveys. No public Cora service exists yet.
 
 ## What works
 
@@ -40,6 +40,24 @@ cora models on opencode pi codex
 | vLLM | `http://localhost:8000/v1` |
 
 Codex only speaks the OpenAI Responses API, so its endpoint must serve `/v1/responses`.
+
+## Signing in to a Cora service
+
+```bash
+cora login --api http://localhost:8790
+```
+
+This opens your browser; when you approve, the page hands a Cora key back to the CLI on your own machine. On a remote machine use `cora login --paste` and paste the code the page shows.
+
+After login:
+
+- Cora models are served by the service, using your Cora key. Restart your tools once.
+- The status line and card show your balance in Cora dollars, for example `C$1.483`, refreshed after each agent run.
+- `/cora take` (or `cora earn take`) asks the current survey's questions as keyboard choices, one at a time. Each answer is saved as you give it, and the reward arrives when you finish.
+- `cora outbox` prints every request Cora's own code sent to the service.
+- `cora logout` revokes the key and returns to your local endpoint.
+
+When credits run out, the model request fails with a message telling you to earn more or switch model; nothing is sent to the model.
 
 ## What `cora models on` changes
 
